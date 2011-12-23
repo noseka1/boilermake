@@ -53,8 +53,37 @@ endef
 #
 # $(call ADD_OBJECT_RULE, BUILD_DIR, SOURCE_DIR, EXT, COMPILE_C_CMDS)
 define ADD_OBJECT_RULE
-${1}/%.o: ${2}/${strip ${3}}
+${1}/%.o: ${2}/${strip ${3}} | generate_source
 	${4}
+
+${1}/%.o: ${1}/${strip ${3}} | generate_source
+	${4}
+endef
+
+# ADD_LEX_RULE - Parametrized "function" that adds a pattern rule for
+#   generating source code from lex files with the filename extension
+#   specified in the third argument.
+#
+#   USE WITH EVAL
+#
+# $(call ADD_LEX_RULE, BUILD_DIR, SOURCE_DIR, EXT)
+define ADD_LEX_RULE
+${1}/${3}: ${2}/%.l
+	@mkdir -p $$(dir $$@)
+	${LEX} ${LFLAGS} -t $$< >$$@
+endef
+
+# ADD_YACC_RULE - Parametrized "function" that adds a pattern rule for
+#   generating source code from yacc files with the filename extension
+#   specified in the third argument.
+#
+#   USE WITH EVAL
+#
+# $(call ADD_YACC_RULE, BUILD_DIR, SOURCE_DIR, EXT)
+define ADD_YACC_RULE
+${1}/%.h ${1}/${3}: ${2}/%.y
+	@mkdir -p $$(dir $$@)
+	${YACC} ${YFLAGS} -o $${@:%.h=${3}} -h $${@:${3}=%.h} $$<
 endef
 
 # ADD_TARGET_RULE - Parameterized "function" that adds a new target to the
@@ -316,7 +345,9 @@ endif
 # Define the source file extensions that we know how to handle.
 C_SRC_EXTS := %.c
 CXX_SRC_EXTS := %.C %.cc %.cp %.cpp %.CPP %.cxx %.c++
-ALL_SRC_EXTS := ${C_SRC_EXTS} ${CXX_SRC_EXTS}
+YACC_SRC_EXTS := %.y
+LEX_SRC_EXTS := %.l
+ALL_SRC_EXTS := ${C_SRC_EXTS} ${CXX_SRC_EXTS} ${YACC_SRC_EXTS} ${LEX_SRC_EXTS}
 
 # Initialize global variables.
 ALL_TGTS :=
@@ -338,6 +369,9 @@ INCDIRS := $(addprefix -I,$(call CANONICAL_PATH,${INCDIRS}))
 .PHONY: all
 all: ${ALL_TGTS}
 
+# This target runs before the compilation of any C or C++ file begins
+generate_source:
+
 # Add a new target rule for each user-defined target.
 $(foreach TGT,${ALL_TGTS},\
   $(eval $(call ADD_TARGET_RULE,${TGT})))
@@ -351,6 +385,14 @@ $(foreach EXT,${C_SRC_EXTS},\
 $(foreach EXT,${CXX_SRC_EXTS},\
   $(eval $(call ADD_OBJECT_RULE,${BUILD_DIR},${SOURCE_DIR},\
            ${EXT},$${COMPILE_CXX_CMDS})))
+
+# Add pattern rule(s) for generating C++ file from Lex source.
+$(foreach EXT,${CXX_SRC_EXTS},\
+  $(eval $(call ADD_LEX_RULE,${BUILD_DIR},${SOURCE_DIR},${EXT})))
+
+# Add pattern rule(s) for generating C++ files from Yacc source.
+$(foreach EXT,${CXX_SRC_EXTS},\
+  $(eval $(call ADD_YACC_RULE,${BUILD_DIR},${SOURCE_DIR},${EXT})))
 
 # Add "clean" rules to remove all build-generated files.
 .PHONY: clean
