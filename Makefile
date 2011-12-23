@@ -37,7 +37,7 @@ define ADD_CLEAN_RULE
     clean: clean_${1}
     .PHONY: clean_${1}
     clean_${1}:
-	$$(strip rm -f ${TARGET_DIR}/${1} $${${1}_OBJS:%.o=%.[doP]})
+	$$(strip rm -f ${1} $${${1}_OBJS:%.o=%.[doP]})
 	$${${1}_POSTCLEAN}
 endef
 
@@ -51,9 +51,10 @@ endef
 #
 #   USE WITH EVAL
 #
+# $(call ADD_OBJECT_RULE, BUILD_DIR, SOURCE_DIR, EXT, COMPILE_C_CMDS)
 define ADD_OBJECT_RULE
-${1}/%.o: ${2}
-	${3}
+${1}/%.o: ${2}/${strip ${3}}
+	${4}
 endef
 
 # ADD_TARGET_RULE - Parameterized "function" that adds a new target to the
@@ -66,7 +67,7 @@ endef
 define ADD_TARGET_RULE
     ifeq "$$(suffix ${1})" ".a"
         # Add a target for creating a static library.
-        $${TARGET_DIR}/${1}: $${${1}_OBJS}
+        ${1}: $${${1}_OBJS}
 	    @mkdir -p $$(dir $$@)
 	    $$(strip $${AR} $${ARFLAGS} $$@ $${${1}_OBJS})
 	    $${${1}_POSTMAKE}
@@ -87,7 +88,7 @@ define ADD_TARGET_RULE
             endif
         endif
 
-        $${TARGET_DIR}/${1}: $${${1}_OBJS} $${${1}_PREREQS}
+        ${1}: $${${1}_OBJS} $${${1}_PREREQS}
 	    @mkdir -p $$(dir $$@)
 	    $$(strip $${${1}_LINKER} -o $$@ $${LDFLAGS} $${${1}_LDFLAGS} \
 	        $${${1}_OBJS} $${LDLIBS} $${${1}_LDLIBS})
@@ -103,6 +104,11 @@ endef
 #   the root of the filesystem) also without "./" or "../" sequences.
 define CANONICAL_PATH
 $(patsubst ${CURDIR}/%,%,$(abspath ${1}))
+endef
+
+# $(call SOURCE_DIR_TO_BUILD_DIR, directory-list)
+define SOURCE_DIR_TO_BUILD_DIR
+$(patsubst $(SOURCE_DIR)%,$(BUILD_DIR)%,$1)
 endef
 
 # COMPILE_C_CMDS - Commands for compiling C source code.
@@ -165,12 +171,12 @@ define INCLUDE_SUBMAKEFILE
     # Initialize internal local variables.
     OBJS :=
 
-    # Ensure that valid values are set for BUILD_DIR and TARGET_DIR.
+    # Ensure that valid value is set for BUILD_DIR.
+    ifeq "$$(strip $${SOURCE_DIR})" ""
+        SOURCE_DIR := src
+    endif
     ifeq "$$(strip $${BUILD_DIR})" ""
         BUILD_DIR := build
-    endif
-    ifeq "$$(strip $${TARGET_DIR})" ""
-        TARGET_DIR := .
     endif
 
     # Determine which target this makefile's variables apply to. A stack is
@@ -188,7 +194,7 @@ define INCLUDE_SUBMAKEFILE
         $${TGT}_OBJS      :=
         $${TGT}_POSTCLEAN := $${TGT_POSTCLEAN}
         $${TGT}_POSTMAKE  := $${TGT_POSTMAKE}
-        $${TGT}_PREREQS   := $$(addprefix $${TARGET_DIR}/,$${TGT_PREREQS})
+        $${TGT}_PREREQS   := $${TGT_PREREQS}
         $${TGT}_SOURCES   :=
     else
         # The values defined by this makefile apply to the the "current" target
@@ -223,7 +229,7 @@ define INCLUDE_SUBMAKEFILE
 
         # Convert the source file names to their corresponding object file
         # names.
-        OBJS := $$(addprefix $${BUILD_DIR}/$$(call CANONICAL_PATH,$${TGT})/,\
+        OBJS := $$(call SOURCE_DIR_TO_BUILD_DIR,\
                    $$(addsuffix .o,$$(basename $${SOURCES})))
 
         # Add the objects to the current target's list of objects, and create
@@ -330,23 +336,21 @@ INCDIRS := $(addprefix -I,$(call CANONICAL_PATH,${INCDIRS}))
 # Define the "all" target (which simply builds all user-defined targets) as the
 # default goal.
 .PHONY: all
-all: $(addprefix ${TARGET_DIR}/,${ALL_TGTS})
+all: ${ALL_TGTS}
 
 # Add a new target rule for each user-defined target.
 $(foreach TGT,${ALL_TGTS},\
   $(eval $(call ADD_TARGET_RULE,${TGT})))
 
 # Add pattern rule(s) for creating compiled object code from C source.
-$(foreach TGT,${ALL_TGTS},\
-  $(foreach EXT,${C_SRC_EXTS},\
-    $(eval $(call ADD_OBJECT_RULE,${BUILD_DIR}/$(call CANONICAL_PATH,${TGT}),\
-             ${EXT},$${COMPILE_C_CMDS}))))
+$(foreach EXT,${C_SRC_EXTS},\
+  $(eval $(call ADD_OBJECT_RULE,${BUILD_DIR},${SOURCE_DIR},\
+           ${EXT},$${COMPILE_C_CMDS})))
 
 # Add pattern rule(s) for creating compiled object code from C++ source.
-$(foreach TGT,${ALL_TGTS},\
-  $(foreach EXT,${CXX_SRC_EXTS},\
-    $(eval $(call ADD_OBJECT_RULE,${BUILD_DIR}/$(call CANONICAL_PATH,${TGT}),\
-             ${EXT},$${COMPILE_CXX_CMDS}))))
+$(foreach EXT,${CXX_SRC_EXTS},\
+  $(eval $(call ADD_OBJECT_RULE,${BUILD_DIR},${SOURCE_DIR},\
+           ${EXT},$${COMPILE_CXX_CMDS})))
 
 # Add "clean" rules to remove all build-generated files.
 .PHONY: clean
